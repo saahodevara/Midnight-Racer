@@ -59,7 +59,7 @@ const App: React.FC = () => {
             <h2 className="text-4xl font-bold text-orange-500 italic mb-8">RACER</h2>
             
             <div className="space-y-2 mb-10 text-gray-400 text-sm uppercase tracking-widest">
-              <p>ARROWS TO STEER</p>
+              <p>WASD / ARROWS TO STEER</p>
               <p>DARE TO DRIVE</p>
             </div>
 
