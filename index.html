@@ -3,7 +3,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Midnight Velocity</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -12,6 +12,7 @@
         overflow: hidden;
         background-color: #000;
         font-family: 'Inter', sans-serif;
+        touch-action: none; /* Critical for mobile gaming */
       }
       canvas {
         display: block;

@@ -43,6 +43,7 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
     speed: BASE_SPEED,
     distance: 0,
     keys: { a: false, d: false, arrowleft: false, arrowright: false },
+    pointerSteer: 0, // -1 for left, 1 for right, 0 for none
     traffic: [] as TrafficVehicle[],
     roadChunks: [] as THREE.Mesh[],
     lastSpawn: 0,
@@ -61,6 +62,7 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
       gameRef.current.distance = 0;
       gameRef.current.isGameOver = false;
       gameRef.current.lastSpawn = 0;
+      gameRef.current.pointerSteer = 0;
       
       gameRef.current.traffic.forEach(t => {
         if (t.osc) t.osc.stop();
@@ -129,7 +131,7 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Optimized for mobile high DPI
     mountRef.current.appendChild(renderer.domElement);
 
     const listener = new THREE.AudioListener();
@@ -211,7 +213,6 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
       body.position.y = 0.35;
       car.add(body);
 
-      // AI State
       car.ai = {
         baseSpeed: isDamaged ? 0 : THREE.MathUtils.lerp(TRAFFIC_SPEED_MIN, TRAFFIC_SPEED_MAX, Math.random()),
         currentSpeed: 0,
@@ -224,13 +225,11 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
       };
       car.ai.currentSpeed = car.ai.baseSpeed;
 
-      // Lights
       car.brakeLights = [];
       car.indicators = { left: [], right: [] };
 
       const lightGeom = new THREE.CircleGeometry(0.15, 8);
       
-      // Brake/Rear Lights
       [-0.7, 0.7].forEach(x => {
         const l = new THREE.Mesh(lightGeom, new THREE.MeshBasicMaterial({ color: 0x330000 }));
         l.position.set(x, 0.45, 2.26);
@@ -238,7 +237,6 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
         car.brakeLights.push(l);
       });
 
-      // Indicators
       const indGeom = new THREE.CircleGeometry(0.1, 6);
       [[-0.9, 'left'], [0.9, 'right']].forEach(([x, side]) => {
         const l = new THREE.Mesh(indGeom, new THREE.MeshBasicMaterial({ color: 0x332200 }));
@@ -250,7 +248,6 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
       if (isDamaged) {
         car.brakeLights.forEach(l => { (l.material as THREE.MeshBasicMaterial).color.set(0xff0000); l.name = "danger_light"; });
       } else {
-        // Headlights
         const headGeom = new THREE.CircleGeometry(0.25, 12);
         [-0.75, 0.75].forEach(x => {
           const l = new THREE.Mesh(headGeom, new THREE.MeshBasicMaterial({ color: 0xffffff }));
@@ -310,9 +307,14 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
       state.distance += state.speed * dt;
       onScoreUpdate(state.distance);
 
-      let steerDir = 0;
+      // Unified Steer Logic
+      let steerDir = state.pointerSteer; // Prioritize pointer for mobile
       if (state.keys.a || state.keys.arrowleft) steerDir -= 1;
       if (state.keys.d || state.keys.arrowright) steerDir += 1;
+      
+      // Clamp steerDir to [-1, 1]
+      steerDir = Math.max(-1, Math.min(1, steerDir));
+
       state.playerX += steerDir * STEER_SPEED * dt;
       const limit = ROAD_WIDTH / 2 - 1.4;
       state.playerX = Math.max(-limit, Math.min(limit, state.playerX));
@@ -337,15 +339,13 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
         const car = state.traffic[i];
         const ai = car.ai;
 
-        // 1. BRAKING LOGIC (Car Following)
         ai.isBraking = false;
         let speedLimit = ai.baseSpeed;
 
         if (ai.behavior !== 'STALLED') {
-          // Check for vehicles in front in the same target lane
           for (const other of state.traffic) {
             if (other === car) continue;
-            const distZ = car.position.z - other.position.z; // other is ahead if other.z < car.z
+            const distZ = car.position.z - other.position.z;
             const isAhead = distZ > 0 && distZ < BRAKE_DISTANCE;
             const inSameLane = Math.abs(other.position.x - LANES[ai.targetLaneIndex]) < 1.5;
 
@@ -357,16 +357,12 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
           }
         }
 
-        // Apply speed
         const accel = ai.isBraking ? 40 : 10;
         ai.currentSpeed = THREE.MathUtils.lerp(ai.currentSpeed, speedLimit, accel * dt / Math.max(1, ai.currentSpeed));
         car.position.z += (state.speed - ai.currentSpeed) * dt;
 
-        // 2. LANE CHANGE LOGIC
         if (ai.behavior !== 'STALLED') {
           ai.laneChangeTimer -= dt;
-          
-          // Decide to change lane if blocked or timer expired
           const shouldChange = (ai.laneChangeTimer <= 0) || (ai.isBraking && ai.behavior === 'AGGRESSIVE');
           
           if (shouldChange && !ai.isChangingLanes) {
@@ -376,8 +372,6 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
             
             if (possibleLanes.length > 0) {
               const nextLane = possibleLanes[Math.floor(Math.random() * possibleLanes.length)];
-              
-              // Blind spot check
               let isBlocked = false;
               for (const other of state.traffic) {
                 if (other === car) continue;
@@ -392,12 +386,11 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
                 ai.isChangingLanes = true;
                 ai.laneChangeTimer = 3 + Math.random() * 8;
               } else {
-                ai.laneChangeTimer = 1.0; // Try again soon
+                ai.laneChangeTimer = 1.0;
               }
             }
           }
 
-          // Animate lane change
           const targetX = LANES[ai.targetLaneIndex];
           car.position.x = THREE.MathUtils.lerp(car.position.x, targetX, 2.5 * dt);
           car.rotation.y = (targetX - car.position.x) * 0.1;
@@ -408,19 +401,16 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
           }
         }
 
-        // 3. VISUAL FX (Brake Lights & Indicators)
         const flash = Math.sin(state.time * 12) > 0;
         if (ai.behavior === 'STALLED') {
           car.brakeLights.forEach(l => l.visible = flash);
         } else {
-          // Brake light glow
           car.brakeLights.forEach(l => {
             const mat = l.material as THREE.MeshBasicMaterial;
             if (ai.isBraking) mat.color.set(0xff0000);
             else mat.color.set(0x440000);
           });
 
-          // Indicators
           const indSide = ai.targetLaneIndex < ai.laneIndex ? 'left' : (ai.targetLaneIndex > ai.laneIndex ? 'right' : null);
           ['left', 'right'].forEach(side => {
             const isFlickering = side === indSide && ai.isChangingLanes && flash;
@@ -431,7 +421,6 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
           });
         }
 
-        // 4. COLLISION & DESPAWN
         const distZ = Math.abs(car.position.z - PLAYER_Z);
         const distX = Math.abs(car.position.x - state.playerX);
         if (distZ < 4.0 && distX < 1.7) {
@@ -452,12 +441,29 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
 
     animate();
 
+    // INPUT HANDLERS
     const handleKey = (e: KeyboardEvent, isDown: boolean) => {
       const key = e.key.toLowerCase();
       if (key in gameRef.current.keys) (gameRef.current.keys as any)[key] = isDown;
     };
+
+    const handlePointer = (e: PointerEvent, isDown: boolean) => {
+      if (!isDown) {
+        gameRef.current.pointerSteer = 0;
+        return;
+      }
+      const x = e.clientX / window.innerWidth;
+      gameRef.current.pointerSteer = x < 0.5 ? -1 : 1;
+    };
+
     const onKeyDown = (e: KeyboardEvent) => handleKey(e, true);
     const onKeyUp = (e: KeyboardEvent) => handleKey(e, false);
+    const onPointerDown = (e: PointerEvent) => handlePointer(e, true);
+    const onPointerMove = (e: PointerEvent) => {
+      if (e.buttons > 0) handlePointer(e, true);
+    };
+    const onPointerUp = (e: PointerEvent) => handlePointer(e, false);
+
     const onResize = () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
@@ -466,12 +472,20 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
     window.addEventListener('resize', onResize);
 
     return () => {
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
       window.removeEventListener('resize', onResize);
       mountRef.current?.removeChild(renderer.domElement);
       renderer.dispose();
