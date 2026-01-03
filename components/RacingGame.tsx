@@ -5,7 +5,7 @@ import { GameStatus } from '../types';
 import { 
   LANES, COLORS, ROAD_WIDTH, ROAD_LENGTH, SPAWN_DISTANCE, DESPAWN_DISTANCE, 
   BASE_SPEED, MAX_SPEED, ACCELERATION, PLAYER_Z, STEER_SPEED,
-  TRAFFIC_SPEED_MIN, TRAFFIC_SPEED_MAX, LANE_CHANGE_DURATION, BRAKE_DISTANCE, CRITICAL_DISTANCE
+  TRAFFIC_SPEED_MIN, TRAFFIC_SPEED_MAX, BRAKE_DISTANCE, CRITICAL_DISTANCE
 } from '../constants';
 
 interface TrafficAI {
@@ -85,8 +85,8 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
   };
 
   const stopAllAudio = () => {
-    const ctx = THREE.AudioContext.getContext();
     if (gameRef.current.engineGain) {
+      const ctx = THREE.AudioContext.getContext();
       gameRef.current.engineGain.gain.setTargetAtTime(0, ctx.currentTime, 0.1);
     }
     gameRef.current.traffic.forEach(t => {
@@ -131,7 +131,7 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Optimized for mobile high DPI
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     mountRef.current.appendChild(renderer.domElement);
 
     const listener = new THREE.AudioListener();
@@ -242,7 +242,8 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
         const l = new THREE.Mesh(indGeom, new THREE.MeshBasicMaterial({ color: 0x332200 }));
         l.position.set(x as number, 0.45, 2.26);
         car.add(l);
-        (car.indicators as any)[side].push(l);
+        if (side === 'left') car.indicators.left.push(l);
+        else car.indicators.right.push(l);
       });
 
       if (isDamaged) {
@@ -307,12 +308,10 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
       state.distance += state.speed * dt;
       onScoreUpdate(state.distance);
 
-      // Unified Steer Logic
-      let steerDir = state.pointerSteer; // Prioritize pointer for mobile
+      let steerDir = state.pointerSteer; 
       if (state.keys.a || state.keys.arrowleft) steerDir -= 1;
       if (state.keys.d || state.keys.arrowright) steerDir += 1;
       
-      // Clamp steerDir to [-1, 1]
       steerDir = Math.max(-1, Math.min(1, steerDir));
 
       state.playerX += steerDir * STEER_SPEED * dt;
@@ -412,9 +411,9 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
           });
 
           const indSide = ai.targetLaneIndex < ai.laneIndex ? 'left' : (ai.targetLaneIndex > ai.laneIndex ? 'right' : null);
-          ['left', 'right'].forEach(side => {
+          (['left', 'right'] as const).forEach(side => {
             const isFlickering = side === indSide && ai.isChangingLanes && flash;
-            car.indicators[side as 'left' | 'right'].forEach(l => {
+            car.indicators[side].forEach(l => {
                const mat = l.material as THREE.MeshBasicMaterial;
                mat.color.set(isFlickering ? 0xffaa00 : 0x221100);
             });
@@ -441,7 +440,6 @@ const RacingGame: React.FC<Props> = ({ status, onGameOver, onScoreUpdate }) => {
 
     animate();
 
-    // INPUT HANDLERS
     const handleKey = (e: KeyboardEvent, isDown: boolean) => {
       const key = e.key.toLowerCase();
       if (key in gameRef.current.keys) (gameRef.current.keys as any)[key] = isDown;
